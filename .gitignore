@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+# Project Executables
+**/lexer
+**/semant
+**/parser
+cgen
