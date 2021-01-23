@@ -133,12 +133,26 @@
     %type <program> program
     %type <classes> class_list
     %type <class_> class
-    
-    /* You will want to change the following line. */
-    %type <features> dummy_feature_list
+    %type <features> feature_list
+    %type <feature> feature attribute method
+    %type <formals> formal_list
+    %type <formal> formal
+    %type <cases> case_list
+    %type <case_> case
+    %type <expressions> semicolon_expression_list comma_expression_list
+    %type <expression> expression constant identifier assignment dispatch conditional
+    %type <expression> loop block let_expr let case_expr new isvoid comparison arithmetic
     
     /* Precedence declarations go here. */
-    
+    %right ASSIGN
+    %left NOT
+    %nonassoc LE '<' '='
+    %left '+' '-'
+    %left '*' '/'
+    %left ISVOID
+    %left '~'
+    %left '@'
+    %left '.'
     
     %%
     /* 
@@ -154,21 +168,216 @@
     | class_list class	/* several classes */
     { $$ = append_Classes($1,single_Classes($2)); 
     parse_results = $$; }
+    | error ';'
+    { $$ = nil_Classes(); }
     ;
     
     /* If no parent is specified, the class inherits from the Object class. */
-    class	: CLASS TYPEID '{' dummy_feature_list '}' ';'
+    class	: CLASS TYPEID '{' feature_list '}' ';'
     { $$ = class_($2,idtable.add_string("Object"),$4,
     stringtable.add_string(curr_filename)); }
-    | CLASS TYPEID INHERITS TYPEID '{' dummy_feature_list '}' ';'
+    | CLASS TYPEID INHERITS TYPEID '{' feature_list '}' ';'
     { $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); }
     ;
     
     /* Feature list may be empty, but no empty features in list. */
-    dummy_feature_list:		/* empty */
+    feature_list
+    : feature
+    { $$ = single_Features($1); }
+    | feature_list feature
+    { $$ = append_Features($1, single_Features($2)); }
+    |
     {  $$ = nil_Features(); }
-    
-    
+    | error ';'
+    { $$ = nil_Features(); }
+    ;
+
+    feature
+    : attribute
+    { $$ = $1; }
+    | method
+    { $$ = $1; }
+    ;
+
+    attribute
+    : OBJECTID ':' TYPEID ';'
+    { $$ = attr($1, $3, no_expr());  }
+    | OBJECTID ':' TYPEID ASSIGN expression ';'
+    { $$ = attr($1, $3, $5);}
+    ;
+
+    method
+    : OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}' ';'
+    { $$ = method($1, $3, $6, $8); }
+    | OBJECTID '(' ')' ':' TYPEID '{' expression '}' ';'
+    { $$ = method($1, nil_Formals(), $5, $7); }
+    ;
+
+    formal_list
+    : formal
+    { $$ = single_Formals($1); }
+    | formal_list ',' formal
+    { $$ = append_Formals($1, single_Formals($3)); }
+    ;
+
+    formal
+    : OBJECTID ':' TYPEID
+    { $$ = formal($1, $3); }
+    ;
+
+    /* Semicolon separated expression list. Cannot be empty */
+    semicolon_expression_list
+    : expression ';'
+    { $$ = single_Expressions($1); }
+    | semicolon_expression_list expression ';'
+    { $$ = append_Expressions($1, single_Expressions($2)); }
+    | error ';'
+    { $$ = nil_Expressions(); }
+    ;
+
+    /* Comma separated expression list. Can be empty */
+    comma_expression_list
+     :expression
+    { $$ = single_Expressions($1); }
+    | comma_expression_list ',' expression
+    { $$ = append_Expressions($1, single_Expressions($3)); }
+    |
+    { $$ = nil_Expressions(); }
+    ;
+
+    expression
+    : '(' expression ')'
+    { $$ = $2; }
+    | constant
+    | identifier
+    | assignment
+    | dispatch
+    | conditional
+    | loop
+    | block
+    | let_expr
+    | case_expr
+    | new
+    | isvoid
+    | comparison
+    | arithmetic
+    { $$ = $1; }
+    ;
+
+    constant
+    : BOOL_CONST
+    { $$ = bool_const($1); }
+    | STR_CONST
+    { $$ = string_const($1); }
+    | INT_CONST
+    { $$ = int_const($1); }
+    ;
+
+    identifier
+    : OBJECTID
+    { $$ = object($1); }
+    ;
+
+    assignment
+    : OBJECTID ASSIGN expression
+    { $$ = assign($1, $3); }
+    ;
+
+    dispatch
+    : expression '.' OBJECTID '(' comma_expression_list ')'
+    { $$ = dispatch($1, $3, $5); }
+    | OBJECTID '(' comma_expression_list ')'
+    { $$ = dispatch(object(idtable.add_string("self")), $1, $3); }
+    | expression '@' TYPEID '.' OBJECTID '(' comma_expression_list ')'
+    { $$ = static_dispatch($1, $3, $5, $7); }
+    ;
+
+    conditional
+    : IF expression THEN expression ELSE expression FI
+    { $$ = cond($2, $4, $6); }
+    ;
+
+    loop
+    : WHILE expression LOOP expression POOL
+    { $$ = loop($2, $4); }
+    ;
+
+    block
+    : '{' semicolon_expression_list '}'
+    { $$ = block($2); }
+    ;
+
+    let_expr
+    : LET let
+    { $$ = $2; }
+    ;
+
+    let
+    : OBJECTID ':' TYPEID IN expression
+    { $$ = let($1, $3, no_expr(), $5); }
+    | OBJECTID ':' TYPEID ASSIGN expression IN expression
+    { $$ = let($1, $3, $5, $7); }
+    | error IN expression
+    { $$ = $3; }
+    | OBJECTID ':' TYPEID ',' let
+    { $$ = let($1, $3, no_expr(), $5); }
+    | OBJECTID ':' TYPEID ASSIGN expression ',' let
+    { $$ = let($1, $3, $5, $7); }
+    | error ',' let
+    { $$ = $3; }
+    ;
+
+    case_expr
+    : CASE expression OF case_list ESAC
+    { $$ = typcase($2, $4); }
+    ;
+
+    case_list
+    : case
+    { $$ = single_Cases($1); }
+    | case_list case
+    { $$ = append_Cases($1, single_Cases($2)); }
+    ;
+
+    case
+    : OBJECTID ':' TYPEID DARROW expression ';'
+    { $$ = branch($1, $3, $5); }
+    ;
+
+    new
+    : NEW TYPEID
+    { $$ = new_($2); }
+    ;
+
+    isvoid
+    : ISVOID expression
+    { $$ = isvoid($2); }
+    ;
+
+    comparison
+    : expression '=' expression
+    { $$ = eq($1, $3); }
+    | expression '<' expression
+    { $$ = lt($1, $3); }
+    | expression LE expression
+    { $$ = leq($1, $3); }
+    ;
+
+    arithmetic
+    : NOT expression
+    { $$ = comp($2); }
+    | '~'expression
+    { $$ = neg($2); }
+    | expression '+' expression
+    { $$ = plus($1, $3); }
+    | expression '-' expression
+    { $$ = sub($1, $3); }
+    | expression '*' expression
+    { $$ = mul($1, $3); }
+    | expression '/' expression
+    { $$ = divide($1, $3); }
+    ;
+
     /* end of grammar */
     %%
     
